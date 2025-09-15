@@ -1,38 +1,50 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow checks out code, builds an image, performs a container image
-# scan with Anchore's Syft tool, and uploads the results to the GitHub Dependency
-# submission API.
-
-# For more information on the Anchore sbom-action usage
-# and parameters, see https://github.com/anchore/sbom-action. For more
-# information about the Anchore SBOM tool, Syft, see
-# https://github.com/anchore/syft
-name: Anchore Syft SBOM scan
+name: Anchore Syft SBOM + Grype scan
 
 on:
   push:
     branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
 permissions:
   contents: write
+  security-events: write   # SARIF yüklemek için gerekli
 
 jobs:
-  Anchore-Build-Scan:
-    permissions:
-      contents: write # required to upload to the Dependency submission API
+  build-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # Dependency submission API için
+      security-events: write # SARIF yüklemek için
+
     steps:
-    - name: Checkout the code
-      uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag localbuild/testimage:latest
-    - name: Scan the image and upload dependency results
-      uses: anchore/sbom-action@bb716408e75840bbb01e839347cd213767269d4a
-      with:
-        image: "localbuild/testimage:latest"
-        artifact-name: image.spdx.json
-        dependency-snapshot: true
+      - name: Checkout the code
+        uses: actions/checkout@v4
+
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile --tag localbuild/testimage:latest
+
+      # --- SBOM (Syft) ---
+      - name: Scan the image and upload dependency results (Syft SBOM)
+        uses: anchore/sbom-action@v0
+        with:
+          image: "localbuild/testimage:latest"
+          artifact-name: image.spdx.json
+          dependency-snapshot: true
+
+      # --- Grype ile zafiyet taraması ---
+      # anchore/scan-action, Grype'ı çağırır ve SARIF üretebilir
+      - name: Vulnerability scan with Grype (SARIF)
+        uses: anchore/scan-action@v4
+        with:
+          image: "localbuild/testimage:latest"
+          fail-build: false           # İstersen "true" yapıp build'i kırabilirsin
+          severity-cutoff: high       # low|medium|high|critical
+          output-format: sarif
+          only-fixed: true            # sadece fix'i olan bulguları raporla
+          acs-report-enable: true     # (opsiyonel) özet rapor
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
