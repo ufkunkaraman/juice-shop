@@ -21,45 +21,64 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v4
 
-      - name: Build the Docker image
-        run: docker build . --file Dockerfile --tag localbuild/testimage:latest
+      # - name: Build the Docker image
+      #   run: docker build . --file Dockerfile --tag localbuild/testimage:latest
 
-      # --- SBOM (Syft) ---
-      - name: Scan the image and upload dependency results (Syft SBOM)
-        uses: anchore/sbom-action@v0
+      # # --- SBOM (Syft) ---
+      # - name: Scan the image and upload dependency results (Syft SBOM)
+      #   uses: anchore/sbom-action@v0
+      #   with:
+      #     image: "localbuild/testimage:latest"
+      #     artifact-name: image.spdx.json
+      #     dependency-snapshot: true
+
+
+      # # --- Grype ile zafiyet taraması ---
+      # # anchore/scan-action, Grype'ı çağırır ve SARIF üretebilir
+      # - name: Vulnerability scan with Grype (SARIF)
+      #   uses: anchore/scan-action@v4
+      #   with:
+      #     image: "localbuild/testimage:latest"
+      #     fail-build: false           # İstersen "true" yapıp build'i kırabilirsin
+      #     severity-cutoff: high       # low|medium|high|critical
+      #     output-format: sarif
+      #     only-fixed: true            # sadece fix'i olan bulguları raporla
+      #     acs-report-enable: true     # (opsiyonel) özet rapor
+
+      # - name: Upload SARIF to GitHub Code Scanning
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: results.sarif
+
+      # # Scan code using project's configuration on https://semgrep.dev/manage
+      # - uses: returntocorp/semgrep-action@fcd5ab7459e8d91cb1777481980d1b18b4fc6735
+      #   with:
+      #     publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
+      #     publishDeployment: ${{ secrets.SEMGREP_DEPLOYMENT_ID }}
+      #     generateSarif: "1"
+
+      # # Upload SARIF file generated in previous step
+      # - name: Upload SARIF file
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: semgrep.sarif
+      #   if: always()
+
+      - name: Run Gitleaks (fail on findings)
+        uses: zricethezav/gitleaks-action@v2
         with:
-          image: "localbuild/testimage:latest"
-          artifact-name: image.spdx.json
-          dependency-snapshot: true
-
-
-      # --- Grype ile zafiyet taraması ---
-      # anchore/scan-action, Grype'ı çağırır ve SARIF üretebilir
-      - name: Vulnerability scan with Grype (SARIF)
-        uses: anchore/scan-action@v4
-        with:
-          image: "localbuild/testimage:latest"
-          fail-build: false           # İstersen "true" yapıp build'i kırabilirsin
-          severity-cutoff: high       # low|medium|high|critical
-          output-format: sarif
-          only-fixed: true            # sadece fix'i olan bulguları raporla
-          acs-report-enable: true     # (opsiyonel) özet rapor
+          args: >
+            detect
+            --source .
+            --no-git
+            --report-format sarif
+            --report-path gitleaks.sarif
+            --redact
+            --no-banner
+            --exit-code 1  # bulgu varsa non-zero döner ve job kırılır
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
-
-      # Scan code using project's configuration on https://semgrep.dev/manage
-      - uses: returntocorp/semgrep-action@fcd5ab7459e8d91cb1777481980d1b18b4fc6735
-        with:
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          publishDeployment: ${{ secrets.SEMGREP_DEPLOYMENT_ID }}
-          generateSarif: "1"
-
-      # Upload SARIF file generated in previous step
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
         if: always()
+        with:
+          sarif_file: gitleaks.sarif
