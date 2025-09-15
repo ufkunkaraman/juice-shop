@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Docker Image CI (build + SBOM)
 
 on:
   push:
@@ -7,12 +7,49 @@ on:
     branches: [ "master" ]
 
 jobs:
-
-  build:
-
+  build-and-sbom:
     runs-on: ubuntu-latest
 
+    env:
+      IMAGE_NAME: my-image-name
+      IMAGE_TAG: ${{ github.sha }}
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag juiceshop:$(date +%s)
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (optional for multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Buildx ile build edip image'ı yerel daemona "load" ediyoruz ki Snyk image üzerinden SBOM alabilsin
+      - name: Build Docker image (load to local daemon)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Snyk CLI kur
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+        with:
+          version: latest
+
+      # Docker image'tan CycloneDX SBOM üret
+      - name: Generate SBOM with Snyk (CycloneDX JSON)
+        run: snyk sbom --image=${IMAGE_NAME}:${IMAGE_TAG} --format=cyclonedx1.4+json > snyk-sbom.json
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      # (Opsiyonel) Snyk test: raporu JSON olarak kaydetmek istersen aç
+      # - name: Snyk container test (optional)
+      #   run: snyk container test ${IMAGE_NAME}:${IMAGE_TAG} --json-file-output=snyk-report.json || true
+      #   env:
+      #
